@@ -66,11 +66,25 @@ type CertData struct {
 	} `json:"data"`
 }
 
-func monitorCertStream(domains []string, done chan bool) {
+// Config holds the configuration for the certificate monitor
+type Config struct {
+	WebSocketURL string   // URL of the CertStream service
+	Domains      []string // Domains to monitor
+}
+
+// DefaultConfig returns a configuration with default values
+func DefaultConfig() Config {
+	return Config{
+		WebSocketURL: "wss://certstream.calidog.io/",
+		Domains:      []string{},
+	}
+}
+
+func monitorCertStream(config Config, done chan bool) {
 	ctx := context.Background()
 
 	for {
-		conn, _, err := websocket.Dial(ctx, "ws://192.168.1.240:8080/full-stream", nil)
+		conn, _, err := websocket.Dial(ctx, config.WebSocketURL, nil)
 		if err != nil {
 			fmt.Printf("Connection error: %v\n", err)
 			time.Sleep(time.Second)
@@ -103,26 +117,23 @@ func monitorCertStream(domains []string, done chan bool) {
 					continue
 				}
 
-				for _, watchDomain := range domains {
+				for _, watchDomain := range config.Domains {
 					for _, certDomain := range cert.Data.LeafCert.AllDomains {
 						if strings.Contains(strings.ToLower(certDomain), strings.ToLower(watchDomain)) {
-							certTime := time.Unix(int64(cert.Data.LeafCert.NotBefore), 0)
-							now := time.Now()
 							certType := "NEW"
-							if now.Sub(certTime).Hours() > 24 {
+							if time.Now().Sub(time.Unix(int64(cert.Data.LeafCert.NotBefore), 0)).Hours() > 24 {
 								certType = "RENEWAL"
 							}
 
-							fmt.Printf("\nCertificate %s for watched domain: %s\n", certType, watchDomain)
-							fmt.Printf("Matching domain: %s\n", certDomain)
-							fmt.Printf("Issuer: %s\n", cert.Data.LeafCert.Issuer.O)
-							fmt.Printf("Subject CN: %s\n", cert.Data.LeafCert.Subject.CN)
-							fmt.Printf("Source: %s (%s)\n", cert.Data.Source.Name, cert.Data.Source.URL)
-							fmt.Printf("Validity: %s -> %s\n",
-								time.Unix(int64(cert.Data.LeafCert.NotBefore), 0).Format(time.RFC3339),
-								time.Unix(int64(cert.Data.LeafCert.NotAfter), 0).Format(time.RFC3339))
-							fmt.Printf("Found at: %s\n", time.Unix(int64(cert.Data.Seen), 0).Format(time.RFC3339))
-							fmt.Println(strings.Repeat("-", 50))
+							fmt.Printf("[%s] %s: %s (matched: %s), Issuer: %s, Source: %s, Valid: %s -> %s\n",
+								time.Now().Format("15:04:05"),
+								certType,
+								cert.Data.LeafCert.Subject.CN,
+								watchDomain,
+								cert.Data.LeafCert.Issuer.O,
+								cert.Data.Source.Name,
+								time.Unix(int64(cert.Data.LeafCert.NotBefore), 0).Format("2006-01-02"),
+								time.Unix(int64(cert.Data.LeafCert.NotAfter), 0).Format("2006-01-02"))
 							break
 						}
 					}
@@ -142,8 +153,19 @@ func main() {
 		os.Exit(1)
 	}
 
-	domains := os.Args[1:]
-	fmt.Printf("Starting monitoring for domains: %v\n", domains)
+	// Create configuration with default values
+	config := DefaultConfig()
+
+	// Override domains from command line arguments
+	config.Domains = os.Args[1:]
+
+	// Allow override of WebSocket URL through environment variable
+	if wsURL := os.Getenv("CERTSTREAM_URL"); wsURL != "" {
+		config.WebSocketURL = wsURL
+	}
+
+	fmt.Printf("Starting monitoring for domains: %v\n", config.Domains)
+	fmt.Printf("Using CertStream URL: %s\n", config.WebSocketURL)
 	fmt.Println("Waiting for certificates... (Press CTRL+C to exit)")
 
 	done := make(chan bool)
@@ -152,9 +174,8 @@ func main() {
 		signal.Notify(c, os.Interrupt, syscall.SIGTERM)
 		<-c
 		fmt.Println("\nShutting down...")
-		os.Exit(0) // Force exit if graceful shutdown fails
 		done <- true
 	}()
 
-	monitorCertStream(domains, done)
+	monitorCertStream(config, done)
 }
