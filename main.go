@@ -144,7 +144,7 @@ func monitorCertStream(config Config, done chan bool) {
 					continue
 				}
 
-				timestamp := time.Unix(int64(cert.Data.Seen), 0).Format("2006-01-02T15:04:05.000000")
+				timestamp := time.Unix(int64(cert.Data.Seen), 0).Format("2006-01-02T15:04:05")
 
 				// If no domains specified, print all certificates
 				if len(config.Domains) == 0 {
