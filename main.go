@@ -12,7 +12,6 @@ import (
 	"time"
 
 	"github.com/coder/websocket"
-	"github.com/fatih/color"
 )
 
 type CertData struct {
@@ -68,14 +67,25 @@ type CertData struct {
 	} `json:"data"`
 }
 
+// ANSI color codes
+const (
+	colorReset  = "\033[0m"
+	colorRed    = "\033[31m"
+	colorGreen  = "\033[32m"
+	colorYellow = "\033[33m"
+	colorBlue   = "\033[34m"
+	colorPurple = "\033[35m"
+	colorCyan   = "\033[36m"
+	colorWhite  = "\033[37m"
+)
+
 // Config holds the configuration for the certificate monitor
 type Config struct {
-	WebSocketURL string   // URL of the CertStream service
-	Domains      []string // Domains to monitor (empty means monitor all)
-	Verbose      bool     // Verbose logging mode
+	WebSocketURL string
+	Domains      []string
+	Verbose      bool
 }
 
-// DefaultConfig returns a configuration with default values
 func DefaultConfig() Config {
 	return Config{
 		WebSocketURL: "wss://certstream.calidog.io/",
@@ -83,15 +93,6 @@ func DefaultConfig() Config {
 		Verbose:      false,
 	}
 }
-
-// ColorScheme defines colors for different log types
-var (
-	infoColor    = color.New(color.FgCyan)
-	errorColor   = color.New(color.FgRed)
-	domainColor  = color.New(color.FgGreen)
-	sourceColor  = color.New(color.FgYellow)
-	warningColor = color.New(color.FgYellow)
-)
 
 // logVerbose prints message only in verbose mode
 func logVerbose(config Config, format string, a ...interface{}) {
@@ -102,7 +103,7 @@ func logVerbose(config Config, format string, a ...interface{}) {
 
 // logError prints error messages in red
 func logError(format string, a ...interface{}) {
-	errorColor.Printf(format+"\n", a...)
+	fmt.Printf(colorRed+format+colorReset+"\n", a...)
 }
 
 func monitorCertStream(config Config, done chan bool) {
@@ -143,7 +144,6 @@ func monitorCertStream(config Config, done chan bool) {
 					continue
 				}
 
-				// Use the Seen timestamp from the certificate data
 				timestamp := time.Unix(int64(cert.Data.Seen), 0).Format("2006-01-02T15:04:05.000000")
 
 				// If no domains specified, print all certificates
@@ -155,9 +155,9 @@ func monitorCertStream(config Config, done chan bool) {
 						}
 
 						fmt.Printf("[%s] ", timestamp)
-						sourceColor.Printf("%s", cert.Data.Source.URL)
+						fmt.Printf(colorYellow+"%s"+colorReset, cert.Data.Source.URL)
 						fmt.Printf(" - ")
-						domainColor.Printf("%s", cert.Data.LeafCert.Subject.CN)
+						fmt.Printf(colorGreen+"%s"+colorReset, cert.Data.LeafCert.Subject.CN)
 						fmt.Printf("\n    Type: %s", certType)
 						fmt.Printf("\n    Issuer: %s", cert.Data.LeafCert.Issuer.O)
 						fmt.Printf("\n    Valid: %s -> %s\n",
@@ -165,9 +165,9 @@ func monitorCertStream(config Config, done chan bool) {
 							time.Unix(int64(cert.Data.LeafCert.NotAfter), 0).Format("2006-01-02"))
 					} else {
 						fmt.Printf("[%s] ", timestamp)
-						sourceColor.Printf("%s", cert.Data.Source.URL)
+						fmt.Printf(colorYellow+"%s"+colorReset, cert.Data.Source.URL)
 						fmt.Printf(" - ")
-						domainColor.Printf("%s\n", cert.Data.LeafCert.Subject.CN)
+						fmt.Printf(colorGreen+"%s\n"+colorReset, cert.Data.LeafCert.Subject.CN)
 					}
 					continue
 				}
@@ -183,10 +183,10 @@ func monitorCertStream(config Config, done chan bool) {
 
 							if config.Verbose {
 								fmt.Printf("[%s] ", timestamp)
-								sourceColor.Printf("%s", cert.Data.Source.URL)
+								fmt.Printf(colorYellow+"%s"+colorReset, cert.Data.Source.URL)
 								fmt.Printf(" - ")
-								domainColor.Printf("%s", cert.Data.LeafCert.Subject.CN)
-								warningColor.Printf(" (matched: %s)", watchDomain)
+								fmt.Printf(colorGreen+"%s"+colorReset, cert.Data.LeafCert.Subject.CN)
+								fmt.Printf(colorYellow+" (matched: %s)"+colorReset, watchDomain)
 								fmt.Printf("\n    Type: %s", certType)
 								fmt.Printf("\n    Issuer: %s", cert.Data.LeafCert.Issuer.O)
 								fmt.Printf("\n    Valid: %s -> %s\n",
@@ -194,9 +194,10 @@ func monitorCertStream(config Config, done chan bool) {
 									time.Unix(int64(cert.Data.LeafCert.NotAfter), 0).Format("2006-01-02"))
 							} else {
 								fmt.Printf("[%s] ", timestamp)
-								sourceColor.Printf("%s", cert.Data.Source.URL)
+								fmt.Printf(colorYellow+"%s"+colorReset, cert.Data.Source.URL)
 								fmt.Printf(" - ")
-								domainColor.Printf("%s\n", cert.Data.LeafCert.Subject.CN)
+								fmt.Printf(colorGreen+"%s"+colorReset, cert.Data.LeafCert.Subject.CN)
+								fmt.Printf(colorYellow+" (matched: %s)\n"+colorReset, watchDomain)
 							}
 							break
 						}
@@ -224,10 +225,10 @@ func main() {
 	if len(args) > 0 {
 		config.Domains = args
 		if config.Verbose {
-			infoColor.Printf("Starting monitoring for domains: %v\n", config.Domains)
+			fmt.Printf(colorCyan+"Starting monitoring for domains: %v\n"+colorReset, config.Domains)
 		}
 	} else if config.Verbose {
-		infoColor.Println("No domains specified. Monitoring all certificates.")
+		fmt.Println(colorCyan + "No domains specified. Monitoring all certificates." + colorReset)
 	}
 
 	// Allow override of WebSocket URL through environment variable
@@ -236,8 +237,8 @@ func main() {
 	}
 
 	if config.Verbose {
-		infoColor.Printf("Using CertStream URL: %s\n", config.WebSocketURL)
-		infoColor.Println("Waiting for certificates... (Press CTRL+C to exit)")
+		fmt.Printf(colorCyan+"Using CertStream URL: %s\n"+colorReset, config.WebSocketURL)
+		fmt.Println(colorCyan + "Waiting for certificates... (Press CTRL+C to exit)" + colorReset)
 	}
 
 	done := make(chan bool)
