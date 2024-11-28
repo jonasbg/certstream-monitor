@@ -143,13 +143,14 @@ func monitorCertStream(config Config, done chan bool) {
 					continue
 				}
 
-				timestamp := time.Now().Format("2006-01-02T15:04:05.000000")
+				// Use the Seen timestamp from the certificate data
+				timestamp := time.Unix(int64(cert.Data.Seen), 0).Format("2006-01-02T15:04:05.000000")
 
 				// If no domains specified, print all certificates
 				if len(config.Domains) == 0 {
 					if config.Verbose {
 						certType := "NEW"
-						if time.Now().Sub(time.Unix(int64(cert.Data.LeafCert.NotBefore), 0)).Hours() > 24 {
+						if time.Unix(int64(cert.Data.LeafCert.NotBefore), 0).Add(24 * time.Hour).Before(time.Now()) {
 							certType = "RENEWAL"
 						}
 
@@ -176,7 +177,7 @@ func monitorCertStream(config Config, done chan bool) {
 					for _, certDomain := range cert.Data.LeafCert.AllDomains {
 						if strings.Contains(strings.ToLower(certDomain), strings.ToLower(watchDomain)) {
 							certType := "NEW"
-							if time.Now().Sub(time.Unix(int64(cert.Data.LeafCert.NotBefore), 0)).Hours() > 24 {
+							if time.Unix(int64(cert.Data.LeafCert.NotBefore), 0).Add(24 * time.Hour).Before(time.Now()) {
 								certType = "RENEWAL"
 							}
 
