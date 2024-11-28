@@ -196,8 +196,7 @@ func monitorCertStream(config Config, done chan bool) {
 								fmt.Printf("[%s] ", timestamp)
 								fmt.Printf(colorYellow+"%s"+colorReset, cert.Data.Source.URL)
 								fmt.Printf(" - ")
-								fmt.Printf(colorGreen+"%s"+colorReset, cert.Data.LeafCert.Subject.CN)
-								fmt.Printf(colorYellow+" (matched: %s)\n"+colorReset, watchDomain)
+								fmt.Printf(colorGreen+"%s\n"+colorReset, cert.Data.LeafCert.Subject.CN)
 							}
 							break
 						}
