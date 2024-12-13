@@ -123,15 +123,25 @@ func logError(format string, a ...interface{}) {
 }
 
 func isDomainMatch(certDomain, watchDomain string) bool {
-	certParts := strings.Split(strings.ToLower(certDomain), ".")
-	watchParts := strings.Split(strings.ToLower(watchDomain), ".")
-
-	if len(certParts) != len(watchParts) {
+	// Check for empty domains first
+	if certDomain == "" || watchDomain == "" {
 		return false
 	}
 
-	for i := range certParts {
-		if certParts[i] != watchParts[i] {
+	certParts := strings.Split(strings.ToLower(certDomain), ".")
+	watchParts := strings.Split(strings.ToLower(watchDomain), ".")
+
+	// Certificate domain must have at least as many parts as watch domain
+	if len(certParts) < len(watchParts) {
+		return false
+	}
+
+	// Check if the rightmost parts match the watch domain
+	// For example: www.nhn.no matches nhn.no
+	// But mynhn.no does not match nhn.no
+	certIndex := len(certParts) - len(watchParts)
+	for i := range watchParts {
+		if certParts[certIndex+i] != watchParts[i] {
 			return false
 		}
 	}
