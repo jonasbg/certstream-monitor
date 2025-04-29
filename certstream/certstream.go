@@ -163,11 +163,11 @@ func (l *defaultLogger) Error(format string, v ...interface{}) {
 		"read limited at 32769 bytes",
 		"failed to read frame payload: unexpected EOF",
 		"failed to get reader: failed to read frame header: unexpected EOF",
+		"received close frame: status = StatusNormalClosure", // <- suppress normal closures
 	}
 
-	// Check if error message contains any of the suppressed patterns
-	for _, suppressedErr := range suppressedErrors {
-		if strings.Contains(errorMsg, suppressedErr) {
+	for _, suppressed := range suppressedErrors {
+		if strings.Contains(errorMsg, suppressed) {
 			return
 		}
 	}
