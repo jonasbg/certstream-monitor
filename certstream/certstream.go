@@ -73,18 +73,18 @@ type CertData struct {
 
 // CertEvent represents a certificate event with additional metadata
 type CertEvent struct {
-	Certificate CertData
-	Timestamp   time.Time
-	CertType    string // "NEW" or "RENEWAL"
+	Certificate    CertData
+	Timestamp      time.Time
+	CertType       string // "NEW" or "RENEWAL"
 	MatchedDomains []string
 }
 
 // Config holds the configuration for the certificate monitor
 type Config struct {
-	WebSocketURL     string        // URL of the CertStream service
-	Domains          []string      // Domains to monitor (empty means monitor all)
-	Debug            bool          // Enable debug logging
-	ReconnectTimeout time.Duration // Time to wait before reconnecting after a failure
+	WebSocketURL     string          // URL of the CertStream service
+	Domains          []string        // Domains to monitor (empty means monitor all)
+	Debug            bool            // Enable debug logging
+	ReconnectTimeout time.Duration   // Time to wait before reconnecting after a failure
 	Context          context.Context // Context to control the monitor
 }
 
@@ -128,13 +128,13 @@ func WithContext(ctx context.Context) Option {
 
 // Monitor is the certstream client that monitors certificate transparency logs
 type Monitor struct {
-	config      Config
-	eventsChan  chan CertEvent
-	stopChan    chan struct{}
-	logger      Logger
-	wg          sync.WaitGroup
-	mu          sync.Mutex
-	isRunning   bool
+	config     Config
+	eventsChan chan CertEvent
+	stopChan   chan struct{}
+	logger     Logger
+	wg         sync.WaitGroup
+	mu         sync.Mutex
+	isRunning  bool
 }
 
 // Logger is the interface for logging
@@ -157,7 +157,7 @@ func (l *defaultLogger) Debug(format string, v ...interface{}) {
 
 func (l *defaultLogger) Error(format string, v ...interface{}) {
 	errorMsg := fmt.Sprintf(format, v...)
-	
+
 	// List of errors to suppress
 	suppressedErrors := []string{
 		"read limited at 32769 bytes",
@@ -239,11 +239,11 @@ func (m *Monitor) Start() {
 func (m *Monitor) Stop() {
 	m.mu.Lock()
 	defer m.mu.Unlock()
-	
+
 	if !m.isRunning {
 		return
 	}
-	
+
 	close(m.stopChan)
 	m.wg.Wait()
 	m.isRunning = false
@@ -321,7 +321,7 @@ func (m *Monitor) monitor() {
 // connectAndProcess establishes the websocket connection and processes incoming certificates
 func (m *Monitor) connectAndProcess(ctx context.Context) {
 	m.logger.Debug("Connecting to %s", m.config.WebSocketURL)
-	
+
 	conn, _, err := websocket.Dial(ctx, m.config.WebSocketURL, nil)
 	if err != nil {
 		m.logger.Error("Connection error: %v", err)
