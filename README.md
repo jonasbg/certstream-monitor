@@ -9,6 +9,7 @@ Real-time SSL/TLS certificate monitoring tool using CertStream! 🚀
 - ⚡ Real-time certificate detection
 - 🔐 Tracks both new and renewal certificates
 - 🛠️ Configurable WebSocket endpoint
+- 📦 Usable as a standalone tool or importable module
 
 ## 🚀 Quick Start
 
@@ -23,7 +24,7 @@ go get github.com/jonasbg/certstream-monitor
 CERTSTREAM_URL=ws://your-server:8080/stream ./certstream-monitor example.com
 ```
 
-## 💻 Code Example
+## 💻 Using as a Module
 
 ```go
 package main
@@ -33,45 +34,101 @@ import (
 	"os"
 	"os/signal"
 	"syscall"
+	"time"
 
-	certmonitor "github.com/jonasbg/certstream-monitor"
+	"github.com/jonasbg/certstream-monitor/certstream"
 )
 
 func main() {
-	// Domains to monitor
-	domains := []string{"example.com", "yourdomain.com"}
-	
-	// Create a done channel for shutdown
-	done := make(chan bool)
-	
-	// Set up graceful shutdown
-	go func() {
-		sigChan := make(chan os.Signal, 1)
-		signal.Notify(sigChan, os.Interrupt, syscall.SIGTERM)
-		<-sigChan
-		fmt.Println("\nShutting down...")
-		done <- true
-	}()
-
-	// Initialize and start the monitor
-	monitor := certmonitor.New(
-		certmonitor.WithDomains(domains),
-		certmonitor.WithWebSocketURL("ws://localhost:8080/full-stream"),
+	// Create a monitor with options
+	monitor := certstream.New(
+		certstream.WithDomains([]string{"example.com", "yourdomain.com"}),
+		certstream.WithDebug(true),
+		certstream.WithWebSocketURL("wss://certstream.calidog.io/"),
+		certstream.WithReconnectTimeout(time.Second * 3),
 	)
 
-	// Start monitoring with callback for certificate events
-	monitor.Start(done, func(cert *certmonitor.CertData) {
-		// Handle certificate updates here
-		fmt.Printf("Certificate update for: %s\n", cert.Data.LeafCert.Subject.CN)
-	})
+	// Start monitoring
+	monitor.Start()
+
+	// Setup signal handling for clean shutdown
+	sigChan := make(chan os.Signal, 1)
+	signal.Notify(sigChan, os.Interrupt, syscall.SIGTERM)
+
+	// Process certificate events
+	for {
+		select {
+		case event := <-monitor.Events():
+			// Process the certificate event
+			fmt.Printf("Certificate for: %s (Type: %s)\n", 
+				event.Certificate.Data.LeafCert.Subject.CN,
+				event.CertType)
+
+		case <-sigChan:
+			// Graceful shutdown
+			fmt.Println("Shutting down...")
+			monitor.Stop()
+			return
+		}
+	}
 }
 ```
 
-## 🎮 Usage Examples
+### Available Options
+
+When creating a new monitor with `certstream.New()`, you can provide these options:
+
+- `WithDomains([]string)` - Set domains to monitor
+- `WithWebSocketURL(string)` - Set custom CertStream WebSocket URL
+- `WithDebug(bool)` - Enable debug logging
+- `WithReconnectTimeout(time.Duration)` - Set timeout for reconnection attempts
+- `WithContext(context.Context)` - Set a context to control the monitor lifecycle
+
+### Methods
+
+- `monitor.Start()` - Start the monitoring process
+- `monitor.Stop()` - Stop the monitoring process gracefully
+- `monitor.Events()` - Returns a read-only channel of certificate events
+
+### Custom Logger
+
+```go
+// Implement the Logger interface
+type MyLogger struct {
+    // Your fields here
+}
+
+func (l *MyLogger) Debug(format string, v ...interface{}) {
+    // Your debug logging implementation
+}
+
+func (l *MyLogger) Info(format string, v ...interface{}) {
+    // Your info logging implementation
+}
+
+func (l *MyLogger) Error(format string, v ...interface{}) {
+    // Your error logging implementation
+}
+
+// Set the logger
+monitor.SetLogger(&MyLogger{})
+```
+
+## 🎮 Command Line Usage Examples
 
 Monitor multiple domains:
 ```bash
 ./certstream-monitor example.com subdomain.example.com another.com
+```
+
+Enable verbose output:
+```bash
+./certstream-monitor -v example.com
+```
+
+Show only domain names in output:
+```bash
+./certstream-monitor --urls-only example.com
 ```
 
 ## 🔧 Configuration
