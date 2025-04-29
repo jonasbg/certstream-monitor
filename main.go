@@ -9,7 +9,7 @@ import (
 	"time"
 
 	"github.com/fatih/color"
-	"github.com/jonasbg/certstream-monitor/certstream"
+	"github.com/jonasbg/certstream-monitor/m/v2/certstream"
 )
 
 var (

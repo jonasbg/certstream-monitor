@@ -1,4 +1,4 @@
-module github.com/jonasbg/certstream-monitor/v2/m
+module github.com/jonasbg/certstream-monitor/m/v2
 
 go 1.23
 
