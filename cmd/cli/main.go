@@ -3,104 +3,51 @@
 package main
 
 import (
-	"flag"
-	"fmt"
+	"context"
 	"os"
 	"os/signal"
-	"strings"
 	"syscall"
-	"time"
 
-	"github.com/fatih/color"
 	"github.com/jonasbg/certstream-monitor/certstream"
+	"github.com/jonasbg/certstream-monitor/internal/config"
+	"github.com/jonasbg/certstream-monitor/internal/output"
+	"github.com/jonasbg/certstream-monitor/internal/webhook"
 )
 
-var (
-	infoColor    = color.New(color.FgCyan)
-	domainColor  = color.New(color.FgGreen)
-	warningColor = color.New(color.FgYellow)
-)
-
-// main parses command‑line flags, configures the CertStream monitor, and handles events.
+// main parses command-line flags, configures the CertStream monitor, and handles events.
 func main() {
-	// Flags define CLI options.
-	verbose := flag.Bool("v", false, "Enable verbose output")
-	veryVerbose := flag.Bool("verbose", false, "Enable verbose output")
-	urlsOnly := flag.Bool("urls-only", false, "Output only URLs")
-	reconnectTimeoutSec := flag.Int("reconnect-timeout", 1, "Base reconnection timeout in seconds")
-	maxReconnectTimeoutSec := flag.Int("max-reconnect", 300, "Maximum reconnection timeout in seconds")
-	flag.Parse()
+	// Parse configuration from flags and environment
+	cfg := config.ParseFromFlags()
 
-	// Get domains from command-line arguments or TARGET_DOMAINS environment variable
-	args := flag.Args()
-	var domains []string
+	// Create output formatter
+	formatter := output.NewFormatter(cfg.URLsOnly, cfg.Verbose)
 
-	// Check environment variable first
-	if targetDomains := os.Getenv("TARGET_DOMAINS"); targetDomains != "" {
-		// Support both comma and space-separated values
-		targetDomains = strings.ReplaceAll(targetDomains, ",", " ")
-		for _, domain := range strings.Fields(targetDomains) {
-			domain = strings.TrimSpace(domain)
-			if domain != "" {
-				domains = append(domains, domain)
-			}
-		}
+	// Print startup information
+	wsURL := cfg.WebSocketURL
+	if wsURL == "" {
+		wsURL = ""
+	}
+	formatter.PrintStartupInfo(
+		cfg.Domains,
+		wsURL,
+		certstream.DefaultWebSocketURL,
+		cfg.WebhookURL,
+		cfg.ReconnectTimeoutSec,
+		cfg.MaxReconnectTimeoutSec,
+	)
+
+	if cfg.HasWebhook() && cfg.APIToken != "" {
+		formatter.PrintWebhookConfigured()
 	}
 
-	// Command-line args override environment variable
-	if len(args) > 0 {
-		domains = args
+	// Create webhook client if configured
+	var webhookClient *webhook.Client
+	if cfg.HasWebhook() {
+		webhookClient = webhook.NewClient(cfg.WebhookURL, cfg.APIToken)
 	}
 
-	// Create options for the monitor
-	options := []certstream.Option{
-		certstream.WithDebug(*verbose || *veryVerbose),
-		certstream.WithReconnectTimeout(time.Duration(*reconnectTimeoutSec) * time.Second),
-		certstream.WithMaxReconnectTimeout(time.Duration(*maxReconnectTimeoutSec) * time.Second),
-	}
-
-	// Add domains if specified
-	if len(domains) > 0 {
-		options = append(options, certstream.WithDomains(domains))
-		if *verbose || *veryVerbose {
-			infoColor.Printf("Starting monitoring for domains: %v\n", domains)
-		}
-	} else if *verbose || *veryVerbose {
-		infoColor.Println("No domains specified. Monitoring all certificates.")
-	}
-
-	// Set WebSocket URL from environment variable if provided
-	if wsURL := os.Getenv("CERTSTREAM_URL"); wsURL != "" {
-		options = append(options, certstream.WithWebSocketURL(wsURL))
-	}
-
-	// Set webhook URL from environment variable if provided
-	if webhookURL := os.Getenv("WEBHOOK_URL"); webhookURL != "" {
-		options = append(options, certstream.WithWebhookURL(webhookURL))
-		if *verbose || *veryVerbose {
-			infoColor.Printf("Webhook enabled: %s\n", webhookURL)
-		}
-	}
-
-	// Set API token from environment variable if provided
-	if apiToken := os.Getenv("API_TOKEN"); apiToken != "" {
-		options = append(options, certstream.WithAPIToken(apiToken))
-		if *verbose || *veryVerbose {
-			infoColor.Println("API token configured for webhook authentication")
-		}
-	}
-
-	if *verbose || *veryVerbose {
-		wsURL := os.Getenv("CERTSTREAM_URL")
-		if wsURL != "" {
-			infoColor.Printf("Using CertStream URL: %s\n", wsURL)
-		} else {
-			infoColor.Printf("Using default CertStream URL: %s\n", certstream.DefaultWebSocketURL)
-		}
-		infoColor.Printf("Reconnection settings: base timeout: %ds, max timeout: %ds\n",
-			*reconnectTimeoutSec, *maxReconnectTimeoutSec)
-		infoColor.Println("Waiting for certificates... (Press CTRL+C to exit)")
-	}
+	// Build monitor options
+	options := buildMonitorOptions(cfg)
 
 	// Create and start the monitor
 	monitor := certstream.New(options...)
@@ -114,79 +61,52 @@ func main() {
 	for {
 		select {
 		case event := <-monitor.Events():
-			processCertificateEvent(event, *urlsOnly, *verbose || *veryVerbose)
+			formatter.FormatEvent(event)
+
+			// Send webhook notifications for matched domains
+			if webhookClient != nil && len(event.MatchedDomains) > 0 {
+				sendWebhookNotifications(webhookClient, event)
+			}
 
 		case <-sigChan:
-			if *verbose || *veryVerbose {
-				fmt.Println("\nShutting down...")
-			}
+			formatter.PrintShutdown()
 			monitor.Stop()
 			return
 		}
 	}
 }
 
-// processCertificateEvent handles received certificate events based on configuration
-// processCertificateEvent handles received certificate events based on flags.
-// It prints domain information, optionally filtered to URLs only or verbose details.
-func processCertificateEvent(event certstream.CertEvent, urlsOnly, verbose bool) {
-	cert := event.Certificate
-	timestamp := event.Timestamp.Format("2006-01-02T15:04:05")
-
-	// Display all domains if no specific domains were matched (or no domains were specified)
-	if len(event.MatchedDomains) == 0 {
-		// When no domains are specified, display all certificate domains
-		for _, domain := range cert.Data.LeafCert.AllDomains {
-			if urlsOnly {
-				fmt.Printf("%s\n", domain)
-			} else if verbose {
-				fmt.Printf("[%s] ", timestamp)
-				fmt.Printf("%s", domain)
-				fmt.Printf(" - ")
-				domainColor.Printf("%s", cert.Data.LeafCert.Subject.CN)
-				fmt.Printf("\n    Type: %s", event.CertType)
-				fmt.Printf("\n    Issuer: %s", cert.Data.LeafCert.Issuer.O)
-				fmt.Printf("\n    Valid: %s -> %s\n",
-					time.Unix(int64(cert.Data.LeafCert.NotBefore), 0).Format("2006-01-02"),
-					time.Unix(int64(cert.Data.LeafCert.NotAfter), 0).Format("2006-01-02"))
-			} else {
-				fmt.Printf("[%s] ", timestamp)
-				fmt.Printf("%s", domain)
-				fmt.Printf(" - ")
-				domainColor.Printf("%s\n", cert.Data.LeafCert.Subject.CN)
-			}
-
-			// Only show the first domain in non-verbose mode to avoid flooding the output
-			if !verbose && len(cert.Data.LeafCert.AllDomains) > 1 {
-				break
-			}
-		}
-		return
+// buildMonitorOptions creates monitor options from configuration
+func buildMonitorOptions(cfg *config.CLIConfig) []certstream.Option {
+	options := []certstream.Option{
+		certstream.WithDebug(cfg.Verbose),
+		certstream.WithReconnectTimeout(cfg.ReconnectTimeout()),
+		certstream.WithMaxReconnectTimeout(cfg.MaxReconnectTimeout()),
 	}
 
-	// If we're monitoring specific domains, display matched certificates
-	for _, certDomain := range cert.Data.LeafCert.AllDomains {
+	if cfg.HasDomains() {
+		options = append(options, certstream.WithDomains(cfg.Domains))
+	}
+
+	if cfg.WebSocketURL != "" {
+		options = append(options, certstream.WithWebSocketURL(cfg.WebSocketURL))
+	}
+
+	return options
+}
+
+// sendWebhookNotifications sends webhook notifications for matched domains
+func sendWebhookNotifications(client *webhook.Client, event certstream.CertEvent) {
+	ctx := context.Background()
+
+	// Send notification for each matched domain
+	for _, certDomain := range event.Certificate.Data.LeafCert.AllDomains {
 		for _, watchDomain := range event.MatchedDomains {
 			if certstream.IsDomainMatch(certDomain, watchDomain) {
-				if urlsOnly {
-					fmt.Printf("%s\n", certDomain)
-				} else if verbose {
-					fmt.Printf("[%s] ", timestamp)
-					fmt.Printf("%s", certDomain)
-					fmt.Printf(" - ")
-					domainColor.Printf("%s", cert.Data.LeafCert.Subject.CN)
-					warningColor.Printf(" (matched: %s)", watchDomain)
-					fmt.Printf("\n    Type: %s", event.CertType)
-					fmt.Printf("\n    Issuer: %s", cert.Data.LeafCert.Issuer.O)
-					fmt.Printf("\n    Valid: %s -> %s\n",
-						time.Unix(int64(cert.Data.LeafCert.NotBefore), 0).Format("2006-01-02"),
-						time.Unix(int64(cert.Data.LeafCert.NotAfter), 0).Format("2006-01-02"))
-				} else {
-					fmt.Printf("[%s] ", timestamp)
-					fmt.Printf("%s", certDomain)
-					fmt.Printf(" - ")
-					domainColor.Printf("%s\n", cert.Data.LeafCert.Subject.CN)
-				}
+				// Fire and forget - don't block on webhook sends
+				go func(domain string) {
+					_ = client.Send(ctx, event, domain)
+				}(certDomain)
 				break
 			}
 		}
