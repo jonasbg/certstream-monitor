@@ -115,7 +115,7 @@ func (f *Formatter) printVerboseDetails(cert certstream.CertData, certType strin
 }
 
 // PrintStartupInfo prints comprehensive startup configuration
-func (f *Formatter) PrintStartupInfo(domains []string, wsURL, defaultURL, webhookURL string, reconnectSec, maxReconnectSec int, noBackoff bool, bufferSize, workers int, apiToken string) {
+func (f *Formatter) PrintStartupInfo(domains []string, wsURL, defaultURL, webhookURL string, reconnectSec, maxReconnectSec int, noBackoff bool, bufferSize, workers, statsInterval int, apiToken string) {
 	f.infoColor.Println("=== CertStream Monitor Configuration ===")
 
 	// Domain configuration
@@ -143,6 +143,11 @@ func (f *Formatter) PrintStartupInfo(domains []string, wsURL, defaultURL, webhoo
 	// Performance settings
 	f.infoColor.Printf("Buffer Size: %d\n", bufferSize)
 	f.infoColor.Printf("Worker Count: %d\n", workers)
+	if statsInterval > 0 {
+		f.infoColor.Printf("Stats Interval: %ds\n", statsInterval)
+	} else {
+		f.infoColor.Println("Stats Interval: Disabled")
+	}
 
 	// Webhook configuration
 	if webhookURL != "" {

@@ -10,6 +10,7 @@ import (
 	"sync"
 	"sync/atomic"
 	"syscall"
+	"time"
 
 	"github.com/jonasbg/certstream-monitor/certstream"
 	"github.com/jonasbg/certstream-monitor/internal/config"
@@ -40,6 +41,7 @@ func main() {
 		cfg.NoBackoff,
 		cfg.BufferSize,
 		cfg.WorkerCount,
+		cfg.StatsIntervalSec,
 		cfg.APIToken,
 	)
 
@@ -76,6 +78,46 @@ func main() {
 			}
 		}
 	}()
+
+	if cfg.StatsIntervalSec > 0 {
+		interval := cfg.StatsInterval()
+		go func() {
+			ticker := time.NewTicker(interval)
+			defer ticker.Stop()
+
+			prev := monitor.Stats()
+			for range ticker.C {
+				current := monitor.Stats()
+				currentOutputDropped := atomic.LoadUint64(&droppedEvents)
+
+				intervalSeconds := interval.Seconds()
+				rawRate := float64(current.RawReceived-prev.RawReceived) / intervalSeconds
+				decodeRate := float64(current.CertsDecoded-prev.CertsDecoded) / intervalSeconds
+				eventRate := float64(current.EventsSent-prev.EventsSent) / intervalSeconds
+
+				log.Printf(
+					"Stats: raw=%d (+%.0f/s) dropped=%d rawQ=%d/%d decoded=%d (+%.0f/s) prefilter hit=%d skip=%d events=%d (+%.0f/s) evDrop=%d outQ=%d/%d outDrop=%d",
+					current.RawReceived,
+					rawRate,
+					current.RawDropped,
+					current.RawQueueLen,
+					current.RawQueueCap,
+					current.CertsDecoded,
+					decodeRate,
+					current.PrefilterHits,
+					current.PrefilterSkips,
+					current.EventsSent,
+					eventRate,
+					current.EventsDropped,
+					len(eventQueue),
+					cap(eventQueue),
+					currentOutputDropped,
+				)
+
+				prev = current
+			}
+		}()
+	}
 
 	// Setup signal handling for graceful shutdown
 	sigChan := make(chan os.Signal, 1)

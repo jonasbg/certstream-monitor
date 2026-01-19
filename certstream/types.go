@@ -71,6 +71,21 @@ type CertEvent struct {
 	MatchedDomains []string
 }
 
+// MonitorStats provides counters and queue depths for monitoring throughput.
+type MonitorStats struct {
+	RawReceived    uint64
+	RawDropped     uint64
+	PrefilterHits  uint64
+	PrefilterSkips uint64
+	CertsDecoded   uint64
+	EventsSent     uint64
+	EventsDropped  uint64
+	RawQueueLen    int
+	RawQueueCap    int
+	EventQueueLen  int
+	EventQueueCap  int
+}
+
 // Config holds the configuration for the certificate monitor
 type Config struct {
 	WebSocketURL        string          // URL of the CertStream service

@@ -21,6 +21,13 @@ type Monitor struct {
 	stopChan          chan struct{}
 	logger            Logger
 	lowerDomains      [][]byte
+	rawReceived       uint64
+	rawDropped        uint64
+	prefilterHits     uint64
+	prefilterSkips    uint64
+	certsDecoded      uint64
+	eventsSent        uint64
+	eventsDropped     uint64
 	wg                sync.WaitGroup
 	mu                sync.Mutex
 	isRunning         bool
@@ -273,6 +280,7 @@ func (m *Monitor) processMessages(ctx context.Context, conn *websocket.Conn) boo
 				m.logger.Error("Read error: %v", err)
 				return false
 			}
+			atomic.AddUint64(&m.rawReceived, 1)
 
 			// Queue message for processing without blocking
 			select {
@@ -281,6 +289,7 @@ func (m *Monitor) processMessages(ctx context.Context, conn *websocket.Conn) boo
 			default:
 				// Buffer full, drop message (should rarely happen with large buffer)
 				dropped := atomic.AddUint64(&m.droppedMessages, 1)
+				atomic.AddUint64(&m.rawDropped, 1)
 				if dropped%1000 == 0 {
 					m.logger.Error("Dropped %d messages due to processing backlog", dropped)
 				}
@@ -309,7 +318,11 @@ func (m *Monitor) processWorker() {
 // processCertificate parses and handles a certificate message
 func (m *Monitor) processCertificate(data []byte) {
 	if len(m.config.Domains) > 0 && !m.quickPayloadMatch(data) {
+		atomic.AddUint64(&m.prefilterSkips, 1)
 		return
+	}
+	if len(m.config.Domains) > 0 {
+		atomic.AddUint64(&m.prefilterHits, 1)
 	}
 
 	var cert CertData
@@ -317,6 +330,7 @@ func (m *Monitor) processCertificate(data []byte) {
 		m.logger.Error("JSON error: %v", err)
 		return
 	}
+	atomic.AddUint64(&m.certsDecoded, 1)
 
 	if cert.MessageType != "certificate_update" {
 		return
@@ -417,10 +431,29 @@ func (m *Monitor) sendEvent(event CertEvent) {
 	select {
 	case m.eventsChan <- event:
 		// Event sent successfully
+		atomic.AddUint64(&m.eventsSent, 1)
 	default:
 		// Channel is full, skip the event (consumer is too slow)
+		atomic.AddUint64(&m.eventsDropped, 1)
 		if m.config.Debug {
 			m.logger.Debug("Event channel full, consumer too slow")
 		}
+	}
+}
+
+// Stats returns a snapshot of monitor counters and queue depths.
+func (m *Monitor) Stats() MonitorStats {
+	return MonitorStats{
+		RawReceived:    atomic.LoadUint64(&m.rawReceived),
+		RawDropped:     atomic.LoadUint64(&m.rawDropped),
+		PrefilterHits:  atomic.LoadUint64(&m.prefilterHits),
+		PrefilterSkips: atomic.LoadUint64(&m.prefilterSkips),
+		CertsDecoded:   atomic.LoadUint64(&m.certsDecoded),
+		EventsSent:     atomic.LoadUint64(&m.eventsSent),
+		EventsDropped:  atomic.LoadUint64(&m.eventsDropped),
+		RawQueueLen:    len(m.rawMessageChan),
+		RawQueueCap:    cap(m.rawMessageChan),
+		EventQueueLen:  len(m.eventsChan),
+		EventQueueCap:  cap(m.eventsChan),
 	}
 }

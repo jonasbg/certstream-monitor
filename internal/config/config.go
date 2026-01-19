@@ -22,6 +22,7 @@ type CLIConfig struct {
 	NoBackoff              bool
 	BufferSize             int
 	WorkerCount            int
+	StatsIntervalSec       int
 
 	// Domain filtering
 	Domains []string
@@ -44,6 +45,7 @@ func ParseFromFlags() *CLIConfig {
 	noBackoff := flag.Bool("no-backoff", false, "Disable exponential backoff for reconnections (reconnect immediately)")
 	bufferSize := flag.Int("buffer-size", 50000, "Internal event buffer size for high-volume streams")
 	workerCount := flag.Int("workers", 4, "Number of parallel workers for processing messages")
+	statsInterval := flag.Int("stats-interval", 30, "Log processing stats every N seconds (0 to disable)")
 
 	flag.Parse()
 
@@ -55,6 +57,7 @@ func ParseFromFlags() *CLIConfig {
 	cfg.NoBackoff = *noBackoff
 	cfg.BufferSize = *bufferSize
 	cfg.WorkerCount = *workerCount
+	cfg.StatsIntervalSec = *statsInterval
 
 	// Parse domains from environment or command-line args
 	cfg.Domains = parseDomains(flag.Args())
@@ -76,6 +79,11 @@ func ParseFromFlags() *CLIConfig {
 	if workersEnv := os.Getenv("WORKERS"); workersEnv != "" {
 		if count := parseInt(workersEnv, cfg.WorkerCount); count > 0 {
 			cfg.WorkerCount = count
+		}
+	}
+	if statsEnv := os.Getenv("STATS_INTERVAL"); statsEnv != "" {
+		if interval := parseInt(statsEnv, cfg.StatsIntervalSec); interval >= 0 {
+			cfg.StatsIntervalSec = interval
 		}
 	}
 
@@ -131,6 +139,11 @@ func (c *CLIConfig) ReconnectTimeout() time.Duration {
 // MaxReconnectTimeout returns the maximum reconnection timeout as a Duration
 func (c *CLIConfig) MaxReconnectTimeout() time.Duration {
 	return time.Duration(c.MaxReconnectTimeoutSec) * time.Second
+}
+
+// StatsInterval returns the stats logging interval as a Duration.
+func (c *CLIConfig) StatsInterval() time.Duration {
+	return time.Duration(c.StatsIntervalSec) * time.Second
 }
 
 // HasDomains returns true if domains are configured
