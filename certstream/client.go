@@ -210,8 +210,8 @@ func (m *Monitor) connectAndProcess(ctx context.Context) bool {
 	}
 	defer conn.Close(websocket.StatusAbnormalClosure, "")
 
-	// Set message read limit to 10MB to handle large certificate messages
-	conn.SetReadLimit(10 * 1024 * 1024)
+	// Set message read limit to 100MB to handle large certificate messages with full chains
+	conn.SetReadLimit(100 * 1024 * 1024)
 
 	m.logger.Debug("Connected to CertStream service")
 
