@@ -1,5 +1,4 @@
 package certstream
-package certstream
 
 import (
 	"encoding/json"
