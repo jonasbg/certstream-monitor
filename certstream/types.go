@@ -78,6 +78,9 @@ type Config struct {
 	Debug               bool            // Enable debug logging
 	ReconnectTimeout    time.Duration   // Base time to wait before reconnecting after a failure
 	MaxReconnectTimeout time.Duration   // Maximum reconnection timeout
+	DisableBackoff      bool            // Disable exponential backoff for immediate reconnection
+	BufferSize          int             // Size of the internal event buffer (default: 10000)
+	WorkerCount         int             // Number of parallel workers for processing (default: 4)
 	Context             context.Context // Context to control the monitor
 }
 
@@ -116,6 +119,27 @@ func WithReconnectTimeout(timeout time.Duration) Option {
 func WithMaxReconnectTimeout(timeout time.Duration) Option {
 	return func(c *Config) {
 		c.MaxReconnectTimeout = timeout
+	}
+}
+
+// WithDisableBackoff disables exponential backoff for immediate reconnection
+func WithDisableBackoff(disable bool) Option {
+	return func(c *Config) {
+		c.DisableBackoff = disable
+	}
+}
+
+// WithBufferSize sets the internal event buffer size
+func WithBufferSize(size int) Option {
+	return func(c *Config) {
+		c.BufferSize = size
+	}
+}
+
+// WithWorkerCount sets the number of parallel workers for processing
+func WithWorkerCount(count int) Option {
+	return func(c *Config) {
+		c.WorkerCount = count
 	}
 }
 

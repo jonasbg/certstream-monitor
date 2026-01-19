@@ -82,6 +82,9 @@ func buildMonitorOptions(cfg *config.CLIConfig) []certstream.Option {
 		certstream.WithDebug(cfg.Verbose),
 		certstream.WithReconnectTimeout(cfg.ReconnectTimeout()),
 		certstream.WithMaxReconnectTimeout(cfg.MaxReconnectTimeout()),
+		certstream.WithDisableBackoff(cfg.NoBackoff),
+		certstream.WithBufferSize(cfg.BufferSize),
+		certstream.WithWorkerCount(cfg.WorkerCount),
 	}
 
 	if cfg.HasDomains() {

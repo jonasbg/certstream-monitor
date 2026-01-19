@@ -4,6 +4,7 @@ package config
 import (
 	"flag"
 	"os"
+	"strconv"
 	"strings"
 	"time"
 )
@@ -18,6 +19,9 @@ type CLIConfig struct {
 	WebSocketURL           string
 	ReconnectTimeoutSec    int
 	MaxReconnectTimeoutSec int
+	NoBackoff              bool
+	BufferSize             int
+	WorkerCount            int
 
 	// Domain filtering
 	Domains []string
@@ -37,6 +41,9 @@ func ParseFromFlags() *CLIConfig {
 	urlsOnly := flag.Bool("urls-only", false, "Output only URLs")
 	reconnectTimeoutSec := flag.Int("reconnect-timeout", 1, "Base reconnection timeout in seconds")
 	maxReconnectTimeoutSec := flag.Int("max-reconnect", 300, "Maximum reconnection timeout in seconds")
+	noBackoff := flag.Bool("no-backoff", false, "Disable exponential backoff for reconnections (reconnect immediately)")
+	bufferSize := flag.Int("buffer-size", 10000, "Internal event buffer size for high-volume streams")
+	workerCount := flag.Int("workers", 4, "Number of parallel workers for processing messages")
 
 	flag.Parse()
 
@@ -45,6 +52,9 @@ func ParseFromFlags() *CLIConfig {
 	cfg.URLsOnly = *urlsOnly
 	cfg.ReconnectTimeoutSec = *reconnectTimeoutSec
 	cfg.MaxReconnectTimeoutSec = *maxReconnectTimeoutSec
+	cfg.NoBackoff = *noBackoff
+	cfg.BufferSize = *bufferSize
+	cfg.WorkerCount = *workerCount
 
 	// Parse domains from environment or command-line args
 	cfg.Domains = parseDomains(flag.Args())
@@ -53,6 +63,21 @@ func ParseFromFlags() *CLIConfig {
 	cfg.WebSocketURL = os.Getenv("CERTSTREAM_URL")
 	cfg.WebhookURL = os.Getenv("WEBHOOK_URL")
 	cfg.APIToken = os.Getenv("API_TOKEN")
+
+	// Override with environment variables if set (env vars take precedence over defaults, but not over flags)
+	if os.Getenv("NO_BACKOFF") != "" {
+		cfg.NoBackoff = os.Getenv("NO_BACKOFF") == "true" || os.Getenv("NO_BACKOFF") == "1"
+	}
+	if bufferEnv := os.Getenv("BUFFER_SIZE"); bufferEnv != "" {
+		if size := parseInt(bufferEnv, cfg.BufferSize); size > 0 {
+			cfg.BufferSize = size
+		}
+	}
+	if workersEnv := os.Getenv("WORKERS"); workersEnv != "" {
+		if count := parseInt(workersEnv, cfg.WorkerCount); count > 0 {
+			cfg.WorkerCount = count
+		}
+	}
 
 	return cfg
 }
@@ -72,6 +97,14 @@ func parseDomains(args []string) []string {
 	}
 
 	return domains
+}
+
+// parseInt safely parses an integer from a string, returning defaultValue on error
+func parseInt(s string, defaultValue int) int {
+	if val, err := strconv.Atoi(s); err == nil {
+		return val
+	}
+	return defaultValue
 }
 
 // sanitizeDomains splits and cleans domain strings from environment variables

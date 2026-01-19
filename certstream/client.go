@@ -6,6 +6,7 @@ import (
 	"math"
 	"math/rand"
 	"sync"
+	"sync/atomic"
 	"time"
 
 	"github.com/coder/websocket"
@@ -15,12 +16,14 @@ import (
 type Monitor struct {
 	config            Config
 	eventsChan        chan CertEvent
+	rawMessageChan    chan []byte
 	stopChan          chan struct{}
 	logger            Logger
 	wg                sync.WaitGroup
 	mu                sync.Mutex
 	isRunning         bool
 	reconnectAttempts int
+	droppedMessages   uint64 // Counter for dropped messages
 }
 
 // New creates a new certificate monitor with the given options
@@ -34,6 +37,8 @@ func New(options ...Option) *Monitor {
 		Debug:               false,
 		ReconnectTimeout:    time.Second,
 		MaxReconnectTimeout: 5 * time.Minute,
+		BufferSize:          10000,
+		WorkerCount:         4,
 		Context:             context.Background(),
 	}
 
@@ -41,9 +46,18 @@ func New(options ...Option) *Monitor {
 		option(&config)
 	}
 
+	// Ensure reasonable defaults
+	if config.BufferSize < 100 {
+		config.BufferSize = 10000
+	}
+	if config.WorkerCount < 1 {
+		config.WorkerCount = 4
+	}
+
 	return &Monitor{
 		config:            config,
-		eventsChan:        make(chan CertEvent, 100),
+		eventsChan:        make(chan CertEvent, config.BufferSize),
+		rawMessageChan:    make(chan []byte, config.BufferSize*2),
 		stopChan:          make(chan struct{}),
 		logger:            NewDefaultLogger(config.Debug),
 		reconnectAttempts: 0,
@@ -72,6 +86,13 @@ func (m *Monitor) Start() {
 	m.isRunning = true
 	m.mu.Unlock()
 
+	// Start worker pool for processing messages
+	for i := 0; i < m.config.WorkerCount; i++ {
+		m.wg.Add(1)
+		go m.processWorker()
+	}
+
+	// Start main monitor goroutine
 	m.wg.Add(1)
 	go m.monitor()
 }
@@ -133,7 +154,11 @@ func (m *Monitor) monitor() {
 			default:
 				// Calculate backoff with exponential increase
 				backoff := m.calculateBackoff()
-				m.logger.Info("Connection lost. Reconnecting in %v...", backoff)
+				if backoff == 0 {
+					m.logger.Info("Connection lost. Reconnecting immediately...")
+				} else {
+					m.logger.Info("Connection lost. Reconnecting in %v...", backoff)
+				}
 
 				// Use a timer so we can be interrupted by stop signal
 				timer := time.NewTimer(backoff)
@@ -154,6 +179,11 @@ func (m *Monitor) monitor() {
 
 // calculateBackoff computes the backoff duration using exponential strategy
 func (m *Monitor) calculateBackoff() time.Duration {
+	// If backoff is disabled, reconnect immediately
+	if m.config.DisableBackoff {
+		return 0
+	}
+
 	backoffSeconds := float64(m.config.ReconnectTimeout) / float64(time.Second)
 	maxBackoffSeconds := float64(m.config.MaxReconnectTimeout) / float64(time.Second)
 
@@ -210,7 +240,7 @@ func (m *Monitor) pingLoop(ctx context.Context, conn *websocket.Conn) {
 	}
 }
 
-// processMessages reads and processes certificate messages from the WebSocket
+// processMessages reads certificate messages from the WebSocket and queues them for processing
 func (m *Monitor) processMessages(ctx context.Context, conn *websocket.Conn) bool {
 	for {
 		select {
@@ -227,6 +257,33 @@ func (m *Monitor) processMessages(ctx context.Context, conn *websocket.Conn) boo
 				return false
 			}
 
+			// Queue message for processing without blocking
+			select {
+			case m.rawMessageChan <- data:
+				// Successfully queued
+			default:
+				// Buffer full, drop message (should rarely happen with large buffer)
+				dropped := atomic.AddUint64(&m.droppedMessages, 1)
+				if dropped%1000 == 0 {
+					m.logger.Error("Dropped %d messages due to processing backlog", dropped)
+				}
+			}
+		}
+	}
+}
+
+// processWorker processes messages from the raw message channel
+func (m *Monitor) processWorker() {
+	defer m.wg.Done()
+
+	for {
+		select {
+		case <-m.stopChan:
+			return
+		case data, ok := <-m.rawMessageChan:
+			if !ok {
+				return
+			}
 			m.processCertificate(data)
 		}
 	}
@@ -295,7 +352,9 @@ func (m *Monitor) sendEvent(event CertEvent) {
 	case m.eventsChan <- event:
 		// Event sent successfully
 	default:
-		// Channel is full, skip the event
-		m.logger.Debug("Event channel full, skipping event")
+		// Channel is full, skip the event (consumer is too slow)
+		if m.config.Debug {
+			m.logger.Debug("Event channel full, consumer too slow")
+		}
 	}
 }

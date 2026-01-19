@@ -37,6 +37,9 @@ COPY --from=certs /etc/ssl/certs/ca-certificates.crt /etc/ssl/certs/ca-certifica
 ENV TARGET_DOMAINS="" \
     CERTSTREAM_URL="" \
     WEBHOOK_URL="" \
-    API_TOKEN=""
+    API_TOKEN="" \
+    NO_BACKOFF="" \
+    BUFFER_SIZE="" \
+    WORKERS=""
 
 ENTRYPOINT ["/certstream-monitor"]
