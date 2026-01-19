@@ -1,30 +1,146 @@
-# 🔍 CertStream Monitor
+# CertStream Monitor
 
-Real-time SSL/TLS certificate monitoring tool using CertStream! 🚀
+Real-time SSL/TLS certificate monitoring tool using CertStream.
 
-## 🌟 Features
+## Features
 
-- 🎯 Monitor multiple domains
-- 🔄 Auto-reconnection
-- ⚡ Real-time certificate detection
-- 🔐 Tracks both new and renewal certificates
-- 🛠️ Configurable WebSocket endpoint
-- 📦 Usable as a standalone tool or importable module
+- Monitor multiple domains with exact matching
+- Auto-reconnection with exponential backoff
+- Real-time certificate detection
+- Tracks both new and renewal certificates
+- Webhook notifications for matched domains
+- API token authentication support
+- WebSocket ping/pong keepalive
+- Configurable WebSocket endpoint
+- Usable as a standalone tool or importable module
 
-## 🚀 Quick Start
+## Quick Start
 
 ```bash
 # Install
 go get github.com/jonasbg/certstream-monitor
 
-# Run with default settings
-./certstream-monitor example.com
+# Monitor domains from command line
+./certstream-monitor nhn.no example.com
 
-# Run with custom CertStream server
-CERTSTREAM_URL=ws://your-server:8080/stream ./certstream-monitor example.com
+# Monitor domains from environment variable
+TARGET_DOMAINS="nhn.no example.com" ./certstream-monitor
+
+# Use custom CertStream server
+CERTSTREAM_URL="wss://your-certstream-server.com/" ./certstream-monitor nhn.no
+
+# With webhook notifications
+TARGET_DOMAINS="nhn.no" \
+WEBHOOK_URL="https://your-api.com/webhook" \
+API_TOKEN="your-secret-token" \
+./certstream-monitor
+
+# Full configuration example
+TARGET_DOMAINS="nhn.no example.com" \
+CERTSTREAM_URL="wss://certstream.calidog.io/" \
+WEBHOOK_URL="https://your-api.com/webhook" \
+API_TOKEN="your-secret-token" \
+./certstream-monitor -v
 ```
 
-## 💻 Using as a Module
+## Configuration
+
+### Command Line Flags
+
+| Flag | Description | Default |
+|------|-------------|---------|
+| `-v` or `--verbose` | Enable verbose output | `false` |
+| `--urls-only` | Output only URLs | `false` |
+| `--reconnect-timeout` | Base reconnection timeout in seconds | `1` |
+| `--max-reconnect` | Maximum reconnection timeout in seconds | `300` |
+
+### Environment Variables
+
+| Variable | Description | Example |
+|----------|-------------|---------|
+| `TARGET_DOMAINS` | Comma or space-separated list of domains to monitor | `nhn.no example.com` |
+| `WEBHOOK_URL` | Target API endpoint for webhook notifications | `https://api.example.com/webhook` |
+| `API_TOKEN` | Authentication token for webhook (optional) | `your-secret-token` |
+| `CERTSTREAM_URL` | Custom CertStream WebSocket URL (optional) | `wss://certstream.calidog.io/` |
+
+**Note:** Command-line arguments override the `TARGET_DOMAINS` environment variable.
+
+### Domain Matching
+
+The monitor uses exact domain matching to prevent false positives:
+- `nhn.no` matches `nhn.no` and `www.nhn.no`
+- `nhn.no` does NOT match `mynhn.no` or `nhn.no.example.com`
+
+**Note:** If no domains are specified via `TARGET_DOMAINS` or command-line arguments, the monitor will stream ALL certificates from the CertStream server.
+
+### Webhook Notifications
+
+When a matching domain is found, the monitor sends a POST request to the configured webhook URL with the following JSON payload:
+
+```json
+{
+  "domain": "www.nhn.no",
+  "timestamp": "2026-01-19T10:30:45Z",
+  "cert_type": "NEW",
+  "common_name": "www.nhn.no",
+  "issuer": "Let's Encrypt",
+  "not_before": "2026-01-19T00:00:00Z",
+  "not_after": "2026-04-19T00:00:00Z",
+  "all_domains": ["nhn.no", "www.nhn.no"],
+  "matched_with": "nhn.no"
+}
+```
+
+#### Webhook Payload Fields
+
+| Field | Type | Description |
+|-------|------|-------------|
+| `domain` | string | The specific domain that matched your monitored domain |
+| `timestamp` | string (ISO 8601) | When the certificate was seen in the transparency log |
+| `cert_type` | string | Either "NEW" (new certificate) or "RENEWAL" (renewed certificate) |
+| `common_name` | string | The Common Name (CN) from the certificate's subject |
+| `issuer` | string | The organization (O) that issued the certificate |
+| `not_before` | string (ISO 8601) | Certificate validity start date/time |
+| `not_after` | string (ISO 8601) | Certificate validity end date/time |
+| `all_domains` | array of strings | All domains included in the certificate (SAN entries) |
+| `matched_with` | string | The domain from your watch list that triggered this match |
+
+#### Webhook Request Headers
+
+The webhook request includes the following headers:
+- `Content-Type: application/json` - Indicates JSON payload
+- `User-Agent: certstream-monitor/1.0` - Identifies the client application
+- `x-api-token: <your-token>` - Authentication token (only included if `API_TOKEN` is set)
+
+### WebSocket Keepalive
+
+The monitor automatically sends ping frames every 25 seconds to keep the WebSocket connection alive and detect disconnections early.
+
+**Important:** The client (this monitor) sends pings to the server. Most certstream servers (like certstream-server-go) require clients to send pings at least every 60 seconds (recommended 30s interval). The 25-second interval ensures compliance with these requirements.
+
+### CertStream Server Endpoints
+
+If you're running a custom certstream-server-go instance, it offers multiple endpoints:
+
+| Endpoint | Description | Use Case |
+|----------|-------------|----------|
+| `/full-stream` | Full certificate details (includes `as_der` and `chain` fields) | Complete certificate information |
+| `/` | Lite stream with reduced details (no `as_der` and `chain`) | Most common, lower bandwidth |
+| `/domains-only` | Only domain names from certificates | Minimal bandwidth, domain monitoring |
+
+Examples:
+```bash
+# Connect to full-stream endpoint
+CERTSTREAM_URL="ws://localhost:9999/full-stream" ./certstream-monitor nhn.no
+
+# Connect to lite stream (root endpoint)
+CERTSTREAM_URL="ws://localhost:9999/" ./certstream-monitor nhn.no
+
+# Connect to domains-only stream
+CERTSTREAM_URL="ws://localhost:9999/domains-only" ./certstream-monitor nhn.no
+```
+
+## Using as a Module
 
 ```go
 package main
@@ -81,7 +197,8 @@ When creating a new monitor with `certstream.New()`, you can provide these optio
 - `WithDomains([]string)` - Set domains to monitor
 - `WithWebSocketURL(string)` - Set custom CertStream WebSocket URL
 - `WithDebug(bool)` - Enable debug logging
-- `WithReconnectTimeout(time.Duration)` - Set timeout for reconnection attempts
+- `WithReconnectTimeout(time.Duration)` - Set base timeout for reconnection attempts
+- `WithMaxReconnectTimeout(time.Duration)` - Set maximum reconnection timeout
 - `WithContext(context.Context)` - Set a context to control the monitor lifecycle
 
 ### Methods
@@ -89,6 +206,7 @@ When creating a new monitor with `certstream.New()`, you can provide these optio
 - `monitor.Start()` - Start the monitoring process
 - `monitor.Stop()` - Stop the monitoring process gracefully
 - `monitor.Events()` - Returns a read-only channel of certificate events
+- `monitor.SetLogger(logger)` - Set a custom logger implementation
 
 ### Custom Logger
 
@@ -114,11 +232,21 @@ func (l *MyLogger) Error(format string, v ...interface{}) {
 monitor.SetLogger(&MyLogger{})
 ```
 
-## 🎮 Command Line Usage Examples
+## Command Line Usage Examples
 
 Monitor multiple domains:
 ```bash
 ./certstream-monitor example.com subdomain.example.com another.com
+```
+
+Monitor domains from environment variable:
+```bash
+TARGET_DOMAINS="nhn.no example.com" ./certstream-monitor
+```
+
+Use custom CertStream server:
+```bash
+CERTSTREAM_URL="wss://your-certstream-server.com/" ./certstream-monitor nhn.no
 ```
 
 Enable verbose output:
@@ -131,23 +259,131 @@ Show only domain names in output:
 ./certstream-monitor --urls-only example.com
 ```
 
-## 🔧 Configuration
-
-Set custom WebSocket URL:
+Full example with webhook and custom server:
 ```bash
-export CERTSTREAM_URL=ws://your-custom-server:8080/stream
+TARGET_DOMAINS="nhn.no" \
+CERTSTREAM_URL="wss://certstream.calidog.io/" \
+WEBHOOK_URL="https://api.example.com/webhook" \
+API_TOKEN="secret-token-123" \
+./certstream-monitor -v
 ```
 
-## 🧱 BUILD
+Testing with local CertStream server:
+```bash
+# Test connection without filtering (streams all certificates)
+CERTSTREAM_URL="ws://localhost:9999/" ./certstream-monitor -v
 
-```go
-CGO_ENABLED=0 GOOS=darwin GOARCH=arm64 go build -ldflags "-s -w" -trimpath -o certstream-monitor main.go
+# With domain filtering on lite endpoint
+CERTSTREAM_URL="ws://localhost:9999/" \
+TARGET_DOMAINS="test.com" \
+./certstream-monitor -v
+
+# With full-stream endpoint
+CERTSTREAM_URL="ws://localhost:9999/full-stream" \
+TARGET_DOMAINS="test.com" \
+./certstream-monitor -v
 ```
 
-## 📜 License
+### Troubleshooting Connection Issues
 
-MIT License 🎉
+- **404 error?** Check the endpoint path - try `/`, `/full-stream`, or `/domains-only`
+- **Connection refused?** Verify the server is running on the specified port
+- **Random disconnects?** This monitor sends pings every 25s as required by certstream-server-go
 
-## 🤝 Contributing
+## Build
 
-PRs welcome! 🎈
+Build for your platform:
+```bash
+go build -o certstream-monitor ./cmd/cli
+```
+
+Build with optimizations (static binary):
+```bash
+CGO_ENABLED=0 go build -ldflags "-s -w" -trimpath -o certstream-monitor ./cmd/cli
+```
+
+Cross-compile for macOS ARM64:
+```bash
+CGO_ENABLED=0 GOOS=darwin GOARCH=arm64 go build -ldflags "-s -w" -trimpath -o certstream-monitor ./cmd/cli
+```
+
+Cross-compile for Linux:
+```bash
+CGO_ENABLED=0 GOOS=linux GOARCH=amd64 go build -ldflags "-s -w" -trimpath -o certstream-monitor ./cmd/cli
+```
+
+## Testing
+
+Run all tests:
+```bash
+go test ./...
+```
+
+Run with coverage:
+```bash
+go test -cover ./...
+```
+
+Run vet and tests:
+```bash
+go vet ./... && go test ./...
+```
+
+## Project Structure
+
+```
+certstream-monitor/
+├── cmd/cli/                  # CLI application entry point
+│   └── main.go
+├── certstream/               # Core monitoring logic
+│   ├── client.go            # WebSocket client & monitor
+│   ├── types.go             # Data structures & options
+│   ├── logger.go            # Logging interface
+│   ├── matcher.go           # Domain matching logic
+│   └── util.go              # Utility functions
+├── internal/                 # Private implementation packages
+│   ├── config/              # Configuration management
+│   ├── output/              # Output formatting
+│   └── webhook/             # Webhook notifications
+└── go.mod
+```
+
+## License
+
+MIT License
+
+## Contributing
+
+Contributions are welcome! Please feel free to submit a Pull Request.
+
+### How to Contribute
+
+1. Fork the repository
+2. Create your feature branch (`git checkout -b feature/amazing-feature`)
+3. Commit your changes (`git commit -m 'Add some amazing feature'`)
+4. Push to the branch (`git push origin feature/amazing-feature`)
+5. Open a Pull Request
+
+### Development
+
+```bash
+# Clone the repository
+git clone https://github.com/jonasbg/certstream-monitor.git
+cd certstream-monitor
+
+# Install dependencies
+go mod download
+
+# Run tests
+go test ./...
+
+# Build
+go build -o certstream-monitor ./cmd/cli
+```
+
+## Support
+
+If you encounter any issues or have questions:
+- Open an issue on GitHub
+- Check existing issues for solutions
+- Review the troubleshooting section above

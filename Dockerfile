@@ -1,19 +1,42 @@
-FROM golang:1.23 AS builder
 
-# Install buildx prerequisites
+# Build stage
+FROM golang:1.25-alpine AS builder
 ARG TARGETARCH
-ARG BUILDPLATFORM
-
-# Build our processor
 WORKDIR /app
+
+# Copy only necessary files for dependency download
+COPY go.mod go.sum ./
+RUN go mod download && go mod verify
+
+# Copy source code
 COPY . .
-RUN CGO_ENABLED=0 GOOS=linux GOARCH=$TARGETARCH go build -o certstream-monitor
 
-FROM alpine:3.18
+# Build with optimizations for minimal size and deterministic output
+RUN CGO_ENABLED=0 GOOS=linux GOARCH=$TARGETARCH \
+    go build \
+    -trimpath \
+    -ldflags="-s -w -extldflags '-static'" \
+    -tags netgo \
+    -o certstream-monitor \
+    ./cmd/cli
 
-# Install CA certificates for HTTPS requests
-RUN apk --no-cache add ca-certificates
+# Intermediate stage to get CA certificates
+FROM alpine:3.20 AS certs
+RUN apk add --no-cache ca-certificates
 
-COPY --from=builder /app/certstream-monitor /usr/local/bin/certstream-monitor
+# Final minimal image
+FROM scratch
 
-ENTRYPOINT ["/usr/local/bin/certstream-monitor"]
+# Copy binary
+COPY --from=builder /app/certstream-monitor /certstream-monitor
+
+# Copy CA certificates for HTTPS
+COPY --from=certs /etc/ssl/certs/ca-certificates.crt /etc/ssl/certs/ca-certificates.crt
+
+# Environment variables
+ENV TARGET_DOMAINS="" \
+    CERTSTREAM_URL="" \
+    WEBHOOK_URL="" \
+    API_TOKEN=""
+
+ENTRYPOINT ["/certstream-monitor"]
