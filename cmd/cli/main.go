@@ -4,8 +4,11 @@ package main
 
 import (
 	"context"
+	"log"
 	"os"
 	"os/signal"
+	"sync"
+	"sync/atomic"
 	"syscall"
 
 	"github.com/jonasbg/certstream-monitor/certstream"
@@ -53,6 +56,27 @@ func main() {
 	monitor := certstream.New(options...)
 	monitor.Start()
 
+	eventQueueSize := minInt(cfg.BufferSize, 10000)
+	eventQueue := make(chan certstream.CertEvent, eventQueueSize)
+	var droppedEvents uint64
+
+	var webhookDispatcher *webhookDispatcher
+	if webhookClient != nil {
+		webhookDispatcher = newWebhookDispatcher(context.Background(), webhookClient, maxInt(1, cfg.WorkerCount), eventQueueSize)
+	}
+
+	var outputWG sync.WaitGroup
+	outputWG.Add(1)
+	go func() {
+		defer outputWG.Done()
+		for event := range eventQueue {
+			formatter.FormatEvent(event)
+			if webhookDispatcher != nil && len(event.MatchedDomains) > 0 {
+				webhookDispatcher.enqueue(event)
+			}
+		}
+	}()
+
 	// Setup signal handling for graceful shutdown
 	sigChan := make(chan os.Signal, 1)
 	signal.Notify(sigChan, os.Interrupt, syscall.SIGTERM)
@@ -61,16 +85,23 @@ func main() {
 	for {
 		select {
 		case event := <-monitor.Events():
-			formatter.FormatEvent(event)
-
-			// Send webhook notifications for matched domains
-			if webhookClient != nil && len(event.MatchedDomains) > 0 {
-				sendWebhookNotifications(webhookClient, event)
+			select {
+			case eventQueue <- event:
+			default:
+				dropped := atomic.AddUint64(&droppedEvents, 1)
+				if dropped%1000 == 1 {
+					log.Printf("Output backlog, dropping events. Dropped: %d\n", dropped)
+				}
 			}
 
 		case <-sigChan:
 			formatter.PrintShutdown()
 			monitor.Stop()
+			close(eventQueue)
+			outputWG.Wait()
+			if webhookDispatcher != nil {
+				webhookDispatcher.closeAndWait()
+			}
 			return
 		}
 	}
@@ -98,20 +129,72 @@ func buildMonitorOptions(cfg *config.CLIConfig) []certstream.Option {
 	return options
 }
 
-// sendWebhookNotifications sends webhook notifications for matched domains
-func sendWebhookNotifications(client *webhook.Client, event certstream.CertEvent) {
-	ctx := context.Background()
+type webhookJob struct {
+	event  certstream.CertEvent
+	domain string
+}
 
-	// Send notification for each matched domain
+type webhookDispatcher struct {
+	jobs    chan webhookJob
+	wg      sync.WaitGroup
+	client  *webhook.Client
+	ctx     context.Context
+	dropped uint64
+}
+
+func newWebhookDispatcher(ctx context.Context, client *webhook.Client, workers, queueSize int) *webhookDispatcher {
+	dispatcher := &webhookDispatcher{
+		jobs:   make(chan webhookJob, queueSize),
+		client: client,
+		ctx:    ctx,
+	}
+
+	for i := 0; i < workers; i++ {
+		dispatcher.wg.Add(1)
+		go func() {
+			defer dispatcher.wg.Done()
+			for job := range dispatcher.jobs {
+				_ = dispatcher.client.Send(dispatcher.ctx, job.event, job.domain)
+			}
+		}()
+	}
+
+	return dispatcher
+}
+
+func (d *webhookDispatcher) enqueue(event certstream.CertEvent) {
 	for _, certDomain := range event.Certificate.Data.LeafCert.AllDomains {
 		for _, watchDomain := range event.MatchedDomains {
 			if certstream.IsDomainMatch(certDomain, watchDomain) {
-				// Fire and forget - don't block on webhook sends
-				go func(domain string) {
-					_ = client.Send(ctx, event, domain)
-				}(certDomain)
+				select {
+				case d.jobs <- webhookJob{event: event, domain: certDomain}:
+				default:
+					dropped := atomic.AddUint64(&d.dropped, 1)
+					if dropped%1000 == 1 {
+						log.Printf("Webhook backlog, dropping notifications. Dropped: %d\n", dropped)
+					}
+				}
 				break
 			}
 		}
 	}
+}
+
+func (d *webhookDispatcher) closeAndWait() {
+	close(d.jobs)
+	d.wg.Wait()
+}
+
+func minInt(a, b int) int {
+	if a < b {
+		return a
+	}
+	return b
+}
+
+func maxInt(a, b int) int {
+	if a > b {
+		return a
+	}
+	return b
 }

@@ -14,19 +14,24 @@ import (
 
 // Client sends webhook notifications for certificate events
 type Client struct {
-	url       string
-	apiToken  string
-	timeout   time.Duration
-	userAgent string
+	url        string
+	apiToken   string
+	timeout    time.Duration
+	userAgent  string
+	httpClient *http.Client
 }
 
 // NewClient creates a new webhook client
 func NewClient(url, apiToken string) *Client {
+	timeout := 10 * time.Second
 	return &Client{
 		url:       url,
 		apiToken:  apiToken,
-		timeout:   10 * time.Second,
+		timeout:   timeout,
 		userAgent: "certstream-monitor/1.0",
+		httpClient: &http.Client{
+			Timeout: timeout,
+		},
 	}
 }
 
@@ -63,8 +68,7 @@ func (c *Client) Send(ctx context.Context, event certstream.CertEvent, matchedDo
 
 	c.setHeaders(req)
 
-	client := &http.Client{Timeout: c.timeout}
-	resp, err := client.Do(req)
+	resp, err := c.httpClient.Do(req)
 	if err != nil {
 		return fmt.Errorf("failed to send webhook request: %w", err)
 	}
@@ -104,6 +108,9 @@ func (c *Client) setHeaders(req *http.Request) {
 // SetTimeout sets the HTTP client timeout
 func (c *Client) SetTimeout(timeout time.Duration) {
 	c.timeout = timeout
+	if c.httpClient != nil {
+		c.httpClient.Timeout = timeout
+	}
 }
 
 // SetUserAgent sets the User-Agent header

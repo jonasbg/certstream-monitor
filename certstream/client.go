@@ -294,30 +294,52 @@ func (m *Monitor) processWorker() {
 
 // processCertificate parses and handles a certificate message
 func (m *Monitor) processCertificate(data []byte) {
+	type certMessageLite struct {
+		MessageType string `json:"message_type"`
+		Data        struct {
+			LeafCert struct {
+				AllDomains []string `json:"all_domains"`
+			} `json:"leaf_cert"`
+		} `json:"data"`
+	}
+
+	var lite certMessageLite
+	if err := json.Unmarshal(data, &lite); err != nil {
+		m.logger.Error("JSON error: %v", err)
+		return
+	}
+
+	if lite.MessageType != "certificate_update" {
+		return
+	}
+
+	// If no domains specified, we need the full payload for output.
+	if len(m.config.Domains) == 0 {
+		var cert CertData
+		if err := json.Unmarshal(data, &cert); err != nil {
+			m.logger.Error("JSON error: %v", err)
+			return
+		}
+		event := m.createCertEvent(cert)
+		m.sendEvent(event)
+		return
+	}
+
+	// Filter by specified domains using the lightweight decode first.
+	matchedDomains := m.findMatchedDomainsFromList(lite.Data.LeafCert.AllDomains)
+	if len(matchedDomains) == 0 {
+		return
+	}
+
 	var cert CertData
 	if err := json.Unmarshal(data, &cert); err != nil {
 		m.logger.Error("JSON error: %v", err)
 		return
 	}
 
-	if cert.MessageType != "certificate_update" {
-		return
-	}
-
 	event := m.createCertEvent(cert)
-
-	// If no domains specified, send all certificates
-	if len(m.config.Domains) == 0 {
-		m.sendEvent(event)
-		return
-	}
-
-	// Filter by specified domains
-	matchedDomains := m.findMatchedDomains(cert)
-	if len(matchedDomains) > 0 {
-		event.MatchedDomains = matchedDomains
-		m.sendEvent(event)
-	}
+	event.MatchedDomains = matchedDomains
+	m.sendEvent(event)
 }
 
 // createCertEvent creates a CertEvent from certificate data
@@ -340,6 +362,19 @@ func (m *Monitor) findMatchedDomains(cert CertData) []string {
 	var matchedDomains []string
 	for _, watchDomain := range m.config.Domains {
 		for _, certDomain := range cert.Data.LeafCert.AllDomains {
+			if IsDomainMatch(certDomain, watchDomain) {
+				matchedDomains = append(matchedDomains, watchDomain)
+				break
+			}
+		}
+	}
+	return matchedDomains
+}
+
+func (m *Monitor) findMatchedDomainsFromList(domains []string) []string {
+	var matchedDomains []string
+	for _, watchDomain := range m.config.Domains {
+		for _, certDomain := range domains {
 			if IsDomainMatch(certDomain, watchDomain) {
 				matchedDomains = append(matchedDomains, watchDomain)
 				break
