@@ -57,7 +57,7 @@ func New(options ...Option) *Monitor {
 	return &Monitor{
 		config:            config,
 		eventsChan:        make(chan CertEvent, config.BufferSize),
-		rawMessageChan:    make(chan []byte, config.BufferSize*2),
+		rawMessageChan:    make(chan []byte, config.BufferSize*3),
 		stopChan:          make(chan struct{}),
 		logger:            NewDefaultLogger(config.Debug),
 		reconnectAttempts: 0,
@@ -209,6 +209,9 @@ func (m *Monitor) connectAndProcess(ctx context.Context) bool {
 		return false
 	}
 	defer conn.Close(websocket.StatusAbnormalClosure, "")
+
+	// Set message read limit to 10MB to handle large certificate messages
+	conn.SetReadLimit(10 * 1024 * 1024)
 
 	m.logger.Debug("Connected to CertStream service")
 
