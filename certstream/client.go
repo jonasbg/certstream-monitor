@@ -37,7 +37,7 @@ func New(options ...Option) *Monitor {
 		Debug:               false,
 		ReconnectTimeout:    time.Second,
 		MaxReconnectTimeout: 5 * time.Minute,
-		BufferSize:          10000,
+		BufferSize:          50000,
 		WorkerCount:         4,
 		Context:             context.Background(),
 	}
@@ -48,7 +48,7 @@ func New(options ...Option) *Monitor {
 
 	// Ensure reasonable defaults
 	if config.BufferSize < 100 {
-		config.BufferSize = 10000
+		config.BufferSize = 50000
 	}
 	if config.WorkerCount < 1 {
 		config.WorkerCount = 4

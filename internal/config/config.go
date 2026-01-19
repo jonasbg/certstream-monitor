@@ -42,7 +42,7 @@ func ParseFromFlags() *CLIConfig {
 	reconnectTimeoutSec := flag.Int("reconnect-timeout", 1, "Base reconnection timeout in seconds")
 	maxReconnectTimeoutSec := flag.Int("max-reconnect", 300, "Maximum reconnection timeout in seconds")
 	noBackoff := flag.Bool("no-backoff", false, "Disable exponential backoff for reconnections (reconnect immediately)")
-	bufferSize := flag.Int("buffer-size", 10000, "Internal event buffer size for high-volume streams")
+	bufferSize := flag.Int("buffer-size", 50000, "Internal event buffer size for high-volume streams")
 	workerCount := flag.Int("workers", 4, "Number of parallel workers for processing messages")
 
 	flag.Parse()

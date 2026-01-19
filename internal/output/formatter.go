@@ -114,35 +114,60 @@ func (f *Formatter) printVerboseDetails(cert certstream.CertData, certType strin
 	fmt.Printf("    Valid: %s -> %s\n", notBefore, notAfter)
 }
 
-// PrintStartupInfo prints startup information in verbose mode
-func (f *Formatter) PrintStartupInfo(domains []string, wsURL, defaultURL, webhookURL string, reconnectSec, maxReconnectSec int) {
-	// Always show which domains we're scanning for when domains are specified
+// PrintStartupInfo prints comprehensive startup configuration
+func (f *Formatter) PrintStartupInfo(domains []string, wsURL, defaultURL, webhookURL string, reconnectSec, maxReconnectSec int, noBackoff bool, bufferSize, workers int, apiToken string) {
+	f.infoColor.Println("=== CertStream Monitor Configuration ===")
+
+	// Domain configuration
 	if len(domains) > 0 {
-		f.infoColor.Printf("Scanning for domains: %v\n", domains)
-	}
-
-	if !f.verbose {
-		return
-	}
-
-	if len(domains) == 0 {
-		f.infoColor.Println("No domains specified. Monitoring all certificates.")
-	}
-
-	if wsURL != "" {
-		f.infoColor.Printf("Using CertStream URL: %s\n", wsURL)
+		f.infoColor.Printf("Target Domains: %v\n", domains)
 	} else {
-		f.infoColor.Printf("Using default CertStream URL: %s\n", defaultURL)
+		f.warningColor.Println("Target Domains: ALL (no filtering)")
 	}
 
-	f.infoColor.Printf("Reconnection settings: base timeout: %ds, max timeout: %ds\n",
-		reconnectSec, maxReconnectSec)
+	// WebSocket URL
+	if wsURL != "" {
+		f.infoColor.Printf("WebSocket URL: %s\n", wsURL)
+	} else {
+		f.infoColor.Printf("WebSocket URL: %s (default)\n", defaultURL)
+	}
 
+	// Connection settings
+	if noBackoff {
+		f.infoColor.Println("Reconnection: Immediate (no backoff)")
+	} else {
+		f.infoColor.Printf("Reconnection: Base timeout: %ds, Max timeout: %ds (exponential backoff)\n",
+			reconnectSec, maxReconnectSec)
+	}
+
+	// Performance settings
+	f.infoColor.Printf("Buffer Size: %d\n", bufferSize)
+	f.infoColor.Printf("Worker Count: %d\n", workers)
+
+	// Webhook configuration
 	if webhookURL != "" {
-		f.infoColor.Printf("Webhook enabled: %s\n", webhookURL)
+		f.infoColor.Printf("Webhook URL: %s\n", webhookURL)
+		if apiToken != "" {
+			maskedToken := maskToken(apiToken)
+			f.infoColor.Printf("API Token: %s\n", maskedToken)
+		} else {
+			f.warningColor.Println("API Token: (not set)")
+		}
+	} else {
+		f.infoColor.Println("Webhook: Disabled")
 	}
 
-	f.infoColor.Println("Waiting for certificates... (Press CTRL+C to exit)")
+	// Output mode
+	if f.urlsOnly {
+		f.infoColor.Println("Output Mode: URLs only")
+	} else if f.verbose {
+		f.infoColor.Println("Output Mode: Verbose")
+	} else {
+		f.infoColor.Println("Output Mode: Normal")
+	}
+
+	f.infoColor.Println("========================================")
+	f.infoColor.Println("Waiting for certificates... (Press CTRL+C to exit)\n")
 }
 
 // PrintShutdown prints shutdown message
@@ -152,9 +177,13 @@ func (f *Formatter) PrintShutdown() {
 	}
 }
 
-// PrintWebhookConfigured prints webhook configuration message
-func (f *Formatter) PrintWebhookConfigured() {
-	if f.verbose {
-		f.infoColor.Println("API token configured for webhook authentication")
+// maskToken masks an API token for display, showing only first and last 4 characters
+func maskToken(token string) string {
+	if token == "" {
+		return "(not set)"
 	}
+	if len(token) <= 8 {
+		return "****"
+	}
+	return token[:4] + "****" + token[len(token)-4:]
 }

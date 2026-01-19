@@ -22,7 +22,7 @@ func main() {
 	// Create output formatter
 	formatter := output.NewFormatter(cfg.URLsOnly, cfg.Verbose)
 
-	// Print startup information
+	// Print startup information with all configuration
 	wsURL := cfg.WebSocketURL
 	if wsURL == "" {
 		wsURL = ""
@@ -34,11 +34,11 @@ func main() {
 		cfg.WebhookURL,
 		cfg.ReconnectTimeoutSec,
 		cfg.MaxReconnectTimeoutSec,
+		cfg.NoBackoff,
+		cfg.BufferSize,
+		cfg.WorkerCount,
+		cfg.APIToken,
 	)
-
-	if cfg.HasWebhook() && cfg.APIToken != "" {
-		formatter.PrintWebhookConfigured()
-	}
 
 	// Create webhook client if configured
 	var webhookClient *webhook.Client

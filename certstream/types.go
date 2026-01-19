@@ -79,7 +79,7 @@ type Config struct {
 	ReconnectTimeout    time.Duration   // Base time to wait before reconnecting after a failure
 	MaxReconnectTimeout time.Duration   // Maximum reconnection timeout
 	DisableBackoff      bool            // Disable exponential backoff for immediate reconnection
-	BufferSize          int             // Size of the internal event buffer (default: 10000)
+	BufferSize          int             // Size of the internal event buffer (default: 50000)
 	WorkerCount         int             // Number of parallel workers for processing (default: 4)
 	Context             context.Context // Context to control the monitor
 }

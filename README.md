@@ -80,7 +80,7 @@ WORKERS=8 \
 
 For high-volume certificate streams (thousands of certificates per second), you can tune the following parameters:
 
-- **Buffer Size** (`--buffer-size` or `BUFFER_SIZE`): Increase the internal event buffer to handle bursts of certificates. Default is 10,000. For high-volume streams, try 50,000 or higher.
+- **Buffer Size** (`--buffer-size` or `BUFFER_SIZE`): Increase the internal event buffer to handle bursts of certificates. Default is 50,000. For extremely high-volume streams, try 100,000 or higher.
 
 - **Worker Count** (`--workers` or `WORKERS`): Number of parallel goroutines processing messages. Default is 4. Increase to 8 or 16 for better throughput on multi-core systems.
 
@@ -226,7 +226,7 @@ When creating a new monitor with `certstream.New()`, you can provide these optio
 - `WithReconnectTimeout(time.Duration)` - Set base timeout for reconnection attempts
 - `WithMaxReconnectTimeout(time.Duration)` - Set maximum reconnection timeout
 - `WithDisableBackoff(bool)` - Disable exponential backoff for immediate reconnection
-- `WithBufferSize(int)` - Set internal event buffer size (default: 10000)
+- `WithBufferSize(int)` - Set internal event buffer size (default: 50000)
 - `WithWorkerCount(int)` - Set number of parallel processing workers (default: 4)
 - `WithContext(context.Context)` - Set a context to control the monitor lifecycle
 
