@@ -85,9 +85,26 @@ When a matching domain is found, the monitor sends a POST request to the configu
 }
 ```
 
-The webhook request includes:
-- `Content-Type: application/json` header
-- `x-api-token: <your-token>` header (if `API_TOKEN` is set)
+#### Webhook Payload Fields
+
+| Field | Type | Description |
+|-------|------|-------------|
+| `domain` | string | The specific domain that matched your monitored domain |
+| `timestamp` | string (ISO 8601) | When the certificate was seen in the transparency log |
+| `cert_type` | string | Either "NEW" (new certificate) or "RENEWAL" (renewed certificate) |
+| `common_name` | string | The Common Name (CN) from the certificate's subject |
+| `issuer` | string | The organization (O) that issued the certificate |
+| `not_before` | string (ISO 8601) | Certificate validity start date/time |
+| `not_after` | string (ISO 8601) | Certificate validity end date/time |
+| `all_domains` | array of strings | All domains included in the certificate (SAN entries) |
+| `matched_with` | string | The domain from your watch list that triggered this match |
+
+#### Webhook Request Headers
+
+The webhook request includes the following headers:
+- `Content-Type: application/json` - Indicates JSON payload
+- `User-Agent: certstream-monitor/1.0` - Identifies the client application
+- `x-api-token: <your-token>` - Authentication token (only included if `API_TOKEN` is set)
 
 ### WebSocket Keepalive
 

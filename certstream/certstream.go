@@ -356,6 +356,7 @@ func (m *Monitor) postToWebhook(event CertEvent, matchedDomain string) {
 	}
 
 	req.Header.Set("Content-Type", "application/json")
+	req.Header.Set("User-Agent", "certstream-monitor/1.0")
 	if m.config.APIToken != "" {
 		req.Header.Set("x-api-token", m.config.APIToken)
 	}
