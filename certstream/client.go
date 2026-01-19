@@ -5,6 +5,7 @@ import (
 	"encoding/json"
 	"math"
 	"math/rand"
+	"strings"
 	"sync"
 	"sync/atomic"
 	"time"
@@ -19,6 +20,7 @@ type Monitor struct {
 	rawMessageChan    chan []byte
 	stopChan          chan struct{}
 	logger            Logger
+	lowerDomains      [][]byte
 	wg                sync.WaitGroup
 	mu                sync.Mutex
 	isRunning         bool
@@ -54,7 +56,7 @@ func New(options ...Option) *Monitor {
 		config.WorkerCount = 4
 	}
 
-	return &Monitor{
+	monitor := &Monitor{
 		config:            config,
 		eventsChan:        make(chan CertEvent, config.BufferSize),
 		rawMessageChan:    make(chan []byte, config.BufferSize*3),
@@ -62,6 +64,18 @@ func New(options ...Option) *Monitor {
 		logger:            NewDefaultLogger(config.Debug),
 		reconnectAttempts: 0,
 	}
+
+	if len(config.Domains) > 0 {
+		monitor.lowerDomains = make([][]byte, 0, len(config.Domains))
+		for _, domain := range config.Domains {
+			if domain == "" {
+				continue
+			}
+			monitor.lowerDomains = append(monitor.lowerDomains, []byte(strings.ToLower(domain)))
+		}
+	}
+
+	return monitor
 }
 
 // SetLogger sets a custom logger for the monitor
@@ -294,40 +308,7 @@ func (m *Monitor) processWorker() {
 
 // processCertificate parses and handles a certificate message
 func (m *Monitor) processCertificate(data []byte) {
-	type certMessageLite struct {
-		MessageType string `json:"message_type"`
-		Data        struct {
-			LeafCert struct {
-				AllDomains []string `json:"all_domains"`
-			} `json:"leaf_cert"`
-		} `json:"data"`
-	}
-
-	var lite certMessageLite
-	if err := json.Unmarshal(data, &lite); err != nil {
-		m.logger.Error("JSON error: %v", err)
-		return
-	}
-
-	if lite.MessageType != "certificate_update" {
-		return
-	}
-
-	// If no domains specified, we need the full payload for output.
-	if len(m.config.Domains) == 0 {
-		var cert CertData
-		if err := json.Unmarshal(data, &cert); err != nil {
-			m.logger.Error("JSON error: %v", err)
-			return
-		}
-		event := m.createCertEvent(cert)
-		m.sendEvent(event)
-		return
-	}
-
-	// Filter by specified domains using the lightweight decode first.
-	matchedDomains := m.findMatchedDomainsFromList(lite.Data.LeafCert.AllDomains)
-	if len(matchedDomains) == 0 {
+	if len(m.config.Domains) > 0 && !m.quickPayloadMatch(data) {
 		return
 	}
 
@@ -337,9 +318,24 @@ func (m *Monitor) processCertificate(data []byte) {
 		return
 	}
 
+	if cert.MessageType != "certificate_update" {
+		return
+	}
+
 	event := m.createCertEvent(cert)
-	event.MatchedDomains = matchedDomains
-	m.sendEvent(event)
+
+	// If no domains specified, send all certificates
+	if len(m.config.Domains) == 0 {
+		m.sendEvent(event)
+		return
+	}
+
+	// Filter by specified domains
+	matchedDomains := m.findMatchedDomains(cert)
+	if len(matchedDomains) > 0 {
+		event.MatchedDomains = matchedDomains
+		m.sendEvent(event)
+	}
 }
 
 // createCertEvent creates a CertEvent from certificate data
@@ -371,17 +367,49 @@ func (m *Monitor) findMatchedDomains(cert CertData) []string {
 	return matchedDomains
 }
 
-func (m *Monitor) findMatchedDomainsFromList(domains []string) []string {
-	var matchedDomains []string
-	for _, watchDomain := range m.config.Domains {
-		for _, certDomain := range domains {
-			if IsDomainMatch(certDomain, watchDomain) {
-				matchedDomains = append(matchedDomains, watchDomain)
+func (m *Monitor) quickPayloadMatch(data []byte) bool {
+	for _, domain := range m.lowerDomains {
+		if len(domain) == 0 {
+			continue
+		}
+		if bytesContainsFold(data, domain) {
+			return true
+		}
+	}
+	return false
+}
+
+func bytesContainsFold(haystack []byte, needle []byte) bool {
+	needleLen := len(needle)
+	if needleLen == 0 || needleLen > len(haystack) {
+		return false
+	}
+
+	first := needle[0]
+	lastStart := len(haystack) - needleLen
+	for i := 0; i <= lastStart; i++ {
+		if asciiLower(haystack[i]) != first {
+			continue
+		}
+		matched := true
+		for j := 1; j < needleLen; j++ {
+			if asciiLower(haystack[i+j]) != needle[j] {
+				matched = false
 				break
 			}
 		}
+		if matched {
+			return true
+		}
 	}
-	return matchedDomains
+	return false
+}
+
+func asciiLower(b byte) byte {
+	if b >= 'A' && b <= 'Z' {
+		return b + 32
+	}
+	return b
 }
 
 // sendEvent sends an event to the events channel
