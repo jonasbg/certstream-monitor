@@ -116,13 +116,16 @@ func (f *Formatter) printVerboseDetails(cert certstream.CertData, certType strin
 
 // PrintStartupInfo prints startup information in verbose mode
 func (f *Formatter) PrintStartupInfo(domains []string, wsURL, defaultURL, webhookURL string, reconnectSec, maxReconnectSec int) {
+	// Always show which domains we're scanning for when domains are specified
+	if len(domains) > 0 {
+		f.infoColor.Printf("Scanning for domains: %v\n", domains)
+	}
+
 	if !f.verbose {
 		return
 	}
 
-	if len(domains) > 0 {
-		f.infoColor.Printf("Starting monitoring for domains: %v\n", domains)
-	} else {
+	if len(domains) == 0 {
 		f.infoColor.Println("No domains specified. Monitoring all certificates.")
 	}
 
