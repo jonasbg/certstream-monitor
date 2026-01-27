@@ -47,8 +47,14 @@ func main() {
 
 	// Create webhook client if configured
 	var webhookClient *webhook.Client
+	var missingWebhook, missingAPIToken bool
 	if cfg.HasWebhook() {
 		webhookClient = webhook.NewClient(cfg.WebhookURL, cfg.APIToken)
+		if cfg.APIToken == "" {
+			missingAPIToken = true
+		}
+	} else {
+		missingWebhook = true
 	}
 
 	// Build monitor options
@@ -68,13 +74,25 @@ func main() {
 	}
 
 	var outputWG sync.WaitGroup
+	var warnWebhookOnce, warnAPITokenOnce sync.Once
 	outputWG.Add(1)
 	go func() {
 		defer outputWG.Done()
 		for event := range eventQueue {
 			formatter.FormatEvent(event)
-			if webhookDispatcher != nil && len(event.MatchedDomains) > 0 {
-				webhookDispatcher.enqueue(event)
+			if len(event.MatchedDomains) > 0 {
+				if missingWebhook {
+					warnWebhookOnce.Do(func() {
+						log.Printf("WARNING: Domain matched but WEBHOOK_URL is not set - notifications will not be sent")
+					})
+				} else if missingAPIToken {
+					warnAPITokenOnce.Do(func() {
+						log.Printf("WARNING: Domain matched but API_TOKEN is not set - webhook requests may fail authentication")
+					})
+				}
+				if webhookDispatcher != nil {
+					webhookDispatcher.enqueue(event)
+				}
 			}
 		}
 	}()
@@ -182,6 +200,7 @@ type webhookDispatcher struct {
 	client  *webhook.Client
 	ctx     context.Context
 	dropped uint64
+	errors  uint64
 }
 
 func newWebhookDispatcher(ctx context.Context, client *webhook.Client, workers, queueSize int) *webhookDispatcher {
@@ -196,7 +215,12 @@ func newWebhookDispatcher(ctx context.Context, client *webhook.Client, workers, 
 		go func() {
 			defer dispatcher.wg.Done()
 			for job := range dispatcher.jobs {
-				_ = dispatcher.client.Send(dispatcher.ctx, job.event, job.domain)
+				if err := dispatcher.client.Send(dispatcher.ctx, job.event, job.domain); err != nil {
+					errCount := atomic.AddUint64(&dispatcher.errors, 1)
+					if errCount == 1 || errCount%100 == 0 {
+						log.Printf("WARNING: Webhook error (total errors: %d): %v", errCount, err)
+					}
+				}
 			}
 		}()
 	}

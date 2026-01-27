@@ -3,6 +3,7 @@ package output
 
 import (
 	"fmt"
+	"os"
 	"time"
 
 	"github.com/fatih/color"
@@ -118,6 +119,9 @@ func (f *Formatter) printVerboseDetails(cert certstream.CertData, certType strin
 func (f *Formatter) PrintStartupInfo(domains []string, wsURL, defaultURL, webhookURL string, reconnectSec, maxReconnectSec int, noBackoff bool, bufferSize, workers, statsInterval int, apiToken string) {
 	f.infoColor.Println("=== CertStream Monitor Configuration ===")
 
+	// Print environment variables being used
+	f.printEnvVariables()
+
 	// Domain configuration
 	if len(domains) > 0 {
 		f.infoColor.Printf("Target Domains: %v\n", domains)
@@ -172,7 +176,39 @@ func (f *Formatter) PrintStartupInfo(domains []string, wsURL, defaultURL, webhoo
 	}
 
 	f.infoColor.Println("========================================")
-	f.infoColor.Println("Waiting for certificates... (Press CTRL+C to exit)\n")
+	f.infoColor.Println("Waiting for certificates... (Press CTRL+C to exit)")
+	fmt.Println()
+}
+
+// printEnvVariables prints the environment variables used by the monitor
+func (f *Formatter) printEnvVariables() {
+	f.infoColor.Println("Environment Variables:")
+
+	envVars := []struct {
+		name   string
+		mask   bool
+	}{
+		{"CERTSTREAM_URL", false},
+		{"WEBHOOK_URL", false},
+		{"API_TOKEN", true},
+		{"TARGET_DOMAINS", false},
+		{"NO_BACKOFF", false},
+		{"BUFFER_SIZE", false},
+		{"WORKERS", false},
+		{"STATS_INTERVAL", false},
+	}
+
+	for _, env := range envVars {
+		value := os.Getenv(env.name)
+		if value == "" {
+			fmt.Printf("  %s: (not set)\n", env.name)
+		} else if env.mask {
+			fmt.Printf("  %s: %s\n", env.name, maskToken(value))
+		} else {
+			fmt.Printf("  %s: %s\n", env.name, value)
+		}
+	}
+	fmt.Println()
 }
 
 // PrintShutdown prints shutdown message
